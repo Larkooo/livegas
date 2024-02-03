@@ -10,5 +10,9 @@
   },
   "workspaces": [
     "packages/*"
-  ]
+  ],
+  "scripts": {
+    "web": "bun run --cwd packages/web",
+    "grpc": "cargo run grpc"
+  }
 }
