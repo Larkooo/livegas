@@ -1,0 +1,2 @@
+# ignore generated code from stats
+packages/proto/bindings/* linguist-vendored
