@@ -1,31 +1,29 @@
 mod services;
 
-pub mod hello_world {
+pub mod pb {
     use tonic::include_proto;
 
-    include_proto!("helloworld");
+    include_proto!("gas");
 }
 
 use tonic::transport::Server;
 
-use crate::hello_world::greeter_server::GreeterServer;
-use crate::services::greeter::MyGreeter;
+use crate::pb::gas_server::GasServer;
+use crate::services::gas::GasService;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
-    health_reporter
-        .set_serving::<GreeterServer<MyGreeter>>()
-        .await;
+    health_reporter.set_serving::<GasServer<GasService>>().await;
 
     let addr = "[::1]:50051".parse().unwrap();
-    let greeter = MyGreeter::default();
+    let gas = GasService::default();
 
     println!("HealthServer + GreeterServer listening on {}", addr);
 
     Server::builder()
         .add_service(health_service)
-        .add_service(GreeterServer::new(greeter))
+        .add_service(GasServer::new(gas))
         .serve(addr)
         .await?;
 

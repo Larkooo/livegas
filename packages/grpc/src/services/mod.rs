@@ -1,1 +1,1 @@
-pub(crate) mod greeter;
+pub(crate) mod gas;
