@@ -6,6 +6,7 @@ pub mod pb {
     include_proto!("gas");
 }
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use ethers::providers::{Middleware, Provider};
@@ -13,14 +14,23 @@ use tokio::sync::Mutex;
 use tonic::transport::Server;
 
 use crate::pb::gas_server::GasServer;
+use crate::pb::Network;
 use crate::services::gas::GasService;
+
+use dotenv::dotenv;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load the .env file
+    dotenv().ok(); 
+    // Hashmap of supported providers
+    let mut providers = HashMap::new();
+
     // WSS url of the ethereum provider
     let provider_url = std::env::var("PROVIDER_WSS_URL")?;
     // A shared provider instance
     let provider = Arc::new(Mutex::new(Provider::connect(provider_url).await?));
+    providers.insert(Network::EthMainnet, provider);
 
     // Sqlite database for caching
     let db_url = std::env::var("DATABASE_URL")?;
@@ -30,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     health_reporter.set_serving::<GasServer<GasService>>().await;
 
     let addr = "[::1]:50051".parse().unwrap();
-    let gas = GasService { provider, database };
+    let gas = GasService { providers, database };
 
     println!("HealthServer + GreeterServer listening on {}", addr);
 

@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS blocks (
-    network INTEGER NOT NULL,
+    network TEXT NOT NULL,
     block_number INTEGER NOT NULL,
     block_hash TEXT NOT NULL,
     gas_fee REAL NOT NULL,
