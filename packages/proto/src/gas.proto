@@ -27,7 +27,7 @@ message SubscriptionRequest {
 // The message containing update information for each new block.
 message BlockUpdate {
   Network network = 1; // The network for which the block update is being sent.
-  int64 blockNumber = 2; // The block number.
+  uint64 blockNumber = 2; // The block number.
   string blockHash = 3;  // Hash of the new block.
   double gasFee = 4;     // Gas fee for transactions in the new block.
 }
@@ -35,8 +35,8 @@ message BlockUpdate {
 // The request message for retrieving gas fees for a specified range of blocks.
 message BlockRangeRequest {
   Network network = 1; // The network for which to retrieve gas fee information.
-  int64 startBlock = 2; // The starting block number.
-  int64 endBlock = 3;   // The ending block number.
+  uint64 startBlock = 2; // The starting block number.
+  uint64 endBlock = 3;   // The ending block number.
 }
 
 // The response message containing a list of block updates within the requested range.

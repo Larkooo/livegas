@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS blocks (
     network INTEGER NOT NULL,
-    blockNumber INTEGER NOT NULL,
-    blockHash TEXT NOT NULL,
-    gasFee REAL NOT NULL,
-    PRIMARY KEY (network, blockNumber)
+    block_number INTEGER NOT NULL,
+    block_hash TEXT NOT NULL,
+    gas_fee REAL NOT NULL,
+    PRIMARY KEY (network, block_number)
 );
