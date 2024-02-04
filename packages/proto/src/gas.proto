@@ -29,7 +29,8 @@ message BlockUpdate {
   Network network = 1; // The network for which the block update is being sent.
   uint64 blockNumber = 2; // The block number.
   string blockHash = 3;  // Hash of the new block.
-  double gasFee = 4;     // Gas fee for transactions in the new block.
+  uint64 timestamp = 4; // The timestamp of the new block.
+  double gasFee = 5;     // Gas fee for transactions in the new block.
 }
 
 // The request message for retrieving gas fees for a specified range of blocks.

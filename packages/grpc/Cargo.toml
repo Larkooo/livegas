@@ -9,12 +9,15 @@ edition = "2021"
 dotenv = "0.15.0"
 ethers = { version = "2.0.13", features = ["rustls", "ws"] }
 futures-util = "0.3.30"
+http = "1.0.0"
 prost = "0.12.3"
 sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio"] }
 tokio = { version = "1.36.0", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["default", "sync"] }
 tonic = "0.10.2"
 tonic-health = "0.10.2"
+tonic-web = "0.10.2"
+tower-http = { version = "0.5.1", features = ["cors"] }
 tracing = "0.1.40"
 
 [build-dependencies]
