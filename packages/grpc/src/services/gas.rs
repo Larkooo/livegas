@@ -10,20 +10,11 @@ use crate::{
         self, gas_server::Gas, BlockRangeReply, BlockRangeRequest, BlockUpdate, Network,
         SubscriptionRequest,
     },
-    Command,
+    provider::service::{Command, ProviderService},
 };
 
 pub struct GasService {
-    pub(crate) block_rx: Arc<
-        Mutex<
-            HashMap<
-                Network,
-                Arc<Mutex<tokio::sync::mpsc::Receiver<Result<BlockUpdate, tonic::Status>>>>,
-            >,
-        >,
-    >,
-    pub(crate) command_tx:
-        Arc<Mutex<HashMap<Network, Arc<Mutex<tokio::sync::mpsc::Sender<Command>>>>>>,
+    pub providers: Arc<Mutex<HashMap<Network, Arc<Mutex<ProviderService>>>>>,
 }
 
 type GasResult<T> = Result<Response<T>, Status>;
@@ -38,8 +29,8 @@ impl Gas for GasService {
         // Req payload
         let request = request.into_inner();
         // Block stream
-        let block_recvs = self.block_rx.clone();
-        let block_recv = block_recvs
+        let providers = self.providers.clone();
+        let provider = providers
             .lock()
             .await
             .get(&request.network())
@@ -50,7 +41,7 @@ impl Gas for GasService {
 
         // Spawn a task to forward the block updates to the client
         tokio::spawn(async move {
-            while let Some(block) = block_recv.lock().await.recv().await {
+            while let Some(block) = provider.lock().await.block_rx.lock().await.recv().await {
                 if let Err(e) = tx.send(block).await {
                     tracing::error!("Failed to send block update: {}", e);
                     break;
@@ -71,30 +62,27 @@ impl Gas for GasService {
         let end_block = req.end_block;
 
         // start_block and end_block have to be multiples of 100
-        if start_block % 100 != 0 || end_block % 100 != 0 {
-            return Err(Status::invalid_argument(
-                "start_block and end_block have to be multiples of 100",
-            ));
-        }
+        // if start_block % 100 != 0 || end_block % 100 != 0 {
+        //     return Err(Status::invalid_argument(
+        //         "start_block and end_block have to be multiples of 100",
+        //     ));
+        // }
 
         let (res_tx, res_rx) = oneshot::channel();
-        self.command_tx
-            .lock()
-            .await
-            .get(&network)
-            .ok_or_else(|| Status::invalid_argument("Unsupported network"))?
-            .lock()
-            .await
-            .send(Command::FetchBlocks {
-                start_block,
-                end_block,
-                res: res_tx,
-            })
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to send command: {}", e);
-                Status::internal("Failed to send command")
-            })?;
+        let providers = self.providers.lock().await;
+        let provider = providers.get(&network).ok_or_else(|| Status::invalid_argument("Unsupported network"))?;
+        let provider = provider.lock().await;
+
+        tracing::debug!("Sending command to fetch blocks");
+
+        provider.command_tx.lock().await.send(Command::FetchBlocks {
+            start_block,
+            end_block,
+            res: res_tx,
+        }).await.map_err(|e| {
+            tracing::error!("Failed to send command: {}", e);
+            Status::internal("Failed to send command")
+        })?;
 
         let blocks = res_rx.await.map_err(|e| {
             tracing::error!("Failed to receive command response: {}", e);
