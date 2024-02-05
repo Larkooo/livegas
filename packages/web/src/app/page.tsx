@@ -14,11 +14,13 @@ import Pill from "@/components/pill";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function Home() {
-  const client = useMemo(
-    () => new GrpcWebImpl("http://localhost:8081", { debug: true }),
+  const gas = useMemo(
+    () => {
+      let grpcWeb = new GrpcWebImpl("http://localhost:8081", { debug: true });
+      return new GasClientImpl(grpcWeb);
+    },
     []
   );
-  const gas = useMemo(() => new GasClientImpl(client), [client]);
 
   const [subscribed, setSubscribed] = useState(false);
   const [blocks, setBlocks] = useState<BlockUpdate[]>([]);
