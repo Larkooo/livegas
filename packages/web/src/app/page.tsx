@@ -1,7 +1,6 @@
 "use client";
 
 import Image from "next/image";
-import { AreaChart } from "@tremor/react";
 import { useEffect, useMemo, useState } from "react";
 import {
   GrpcWebImpl,
@@ -9,6 +8,8 @@ import {
   Network,
   BlockUpdate,
 } from "../../packages/proto/gas";
+import { AreaChart, Card, Title } from "@tremor/react";
+import Tooltip from "@/components/tooltip";
 
 export default function Home() {
   const client = useMemo(
@@ -16,6 +17,8 @@ export default function Home() {
     []
   );
   const gas = useMemo(() => new GasClientImpl(client), [client]);
+
+  const [blocks, setBlocks] = useState<BlockUpdate[]>([]);
 
   useEffect(() => {
     // subscribne to new blocks
@@ -27,7 +30,7 @@ export default function Home() {
 
       sub.subscribe({
         next: (res) => {
-          console.log(res);
+          setBlocks((prev) => [...prev, res]);
         },
         error: (err) => {
           console.error(err);
@@ -46,14 +49,32 @@ export default function Home() {
         endBlock: 0,
       })
       .then((res) => {
-        console.log(res);
+        // we set our fetched blocks
+        setBlocks(res.blockUpdates);
+        // and start our subscription
+        startSubscription();
       });
   }, [gas]);
 
+  useEffect(() => {
+    console.log(blocks);
+  }, [blocks]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      mimi
+      <Card>
+        <Title>Newsletter revenue over time (USD)</Title>
+        <AreaChart
+          className="h-[70vh] w-full mt-4"
+          data={blocks}
+          index="blockNumber"
+          yAxisWidth={50}
+          categories={["gasFee"]}
+          colors={["indigo"]}
+          valueFormatter={(v) => v.toFixed(2) + " wei"}
+          customTooltip={Tooltip}
+        />
+      </Card>
     </main>
   );
 }
