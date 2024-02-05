@@ -20,6 +20,7 @@ export default function Home() {
   );
   const gas = useMemo(() => new GasClientImpl(client), [client]);
 
+  const [subscribed, setSubscribed] = useState(false);
   const [blocks, setBlocks] = useState<BlockUpdate[]>([]);
   const [maxBlocks, setMaxBlocks] = useState(25);
 
@@ -45,7 +46,6 @@ export default function Home() {
       });
     };
 
-    // fetch last 25 blocks
     gas
       .Blocks({
         network: Network.ETH_MAINNET,
@@ -55,10 +55,13 @@ export default function Home() {
       .then((res) => {
         // we set our fetched blocks
         setBlocks(res.blockUpdates);
-        // and start our subscription
-        startSubscription();
+        // start subscription if not already started
+        if (!subscribed) {
+          setSubscribed(true);
+          startSubscription();
+        }
       });
-  }, [gas, maxBlocks]);
+  }, [gas, maxBlocks, subscribed]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24">
