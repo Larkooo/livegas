@@ -1473,6 +1473,7 @@ dependencies = [
  "http",
  "prost",
  "sqlx",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tonic",

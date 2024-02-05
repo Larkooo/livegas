@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use ethers::{
     providers::{Middleware, Provider, Ws},
+    types::{Block, H256},
     utils::hex,
 };
 use sqlx::{Sqlite, SqlitePool};
@@ -12,6 +13,7 @@ use tokio::sync::{
 use tokio_stream::StreamExt;
 
 use crate::{
+    error::Error,
     insert_block,
     pb::{BlockUpdate, Network},
 };
@@ -27,7 +29,7 @@ pub enum Command {
     },
 }
 
-pub type BlockReceiver = Arc<Mutex<Receiver<Result<BlockUpdate, tonic::Status>>>>;
+pub type BlockReceiver = Arc<Mutex<Receiver<BlockUpdate>>>;
 pub type CommandSender = Arc<Mutex<Sender<Command>>>;
 
 /// The provider service.
@@ -36,7 +38,7 @@ pub type CommandSender = Arc<Mutex<Sender<Command>>>;
 pub struct ProviderService {
     network: Network,
     provider: Arc<Mutex<Provider<Ws>>>,
-    block_tx: Sender<Result<BlockUpdate, tonic::Status>>,
+    block_tx: Sender<BlockUpdate>,
     command_rx: Receiver<Command>,
     storage: ProviderStorage,
 }
@@ -63,83 +65,62 @@ impl ProviderService {
         )
     }
 
-    pub async fn run(&mut self) {
+    pub async fn handle_block(&self, block: Block<H256>) -> Result<BlockUpdate, Error> {
+        let network_str = self.network.clone().as_str_name();
+        let block_number = block.number.unwrap().as_u64() as u64;
+        let block_timestamp = block.timestamp.as_u64() as u64;
+        // to hex string
+        let block_hash = block.hash.unwrap().to_fixed_bytes();
+        let block_hash = format!("0x{}", hex::encode(&block_hash));
+        let gas_fee = block
+            .base_fee_per_gas
+            .map(|fee| fee.as_u64() as f64 / 1e9)
+            .unwrap();
+
+        // Add the block to the database
+        let _ = self
+            .storage
+            .insert_block(
+                network_str,
+                block_number as i64,
+                &block_hash,
+                block_timestamp as i64,
+                gas_fee,
+            )
+            .await?;
+
+        tracing::info!(
+            "inserted block {} for network {}",
+            block_number,
+            network_str
+        );
+
+        // Send the block update over the channel
+        let block_update = BlockUpdate {
+            network: self.network.into(),
+            block_number: block_number,
+            block_hash: block_hash,
+            timestamp: block_timestamp,
+            gas_fee: gas_fee,
+        };
+
+        let _ = self.block_tx.send(block_update.clone()).await?;
+
+        Ok(block_update)
+    }
+
+    pub async fn run(&mut self) -> Result<(), Error> {
         let provider = self.provider.lock().await;
 
-        let mut block_stream = match provider.subscribe_blocks().await {
-            Ok(stream) => stream,
-            Err(e) => {
-                let err_msg = format!("failed to subscribe to blocks: {}", e);
-                tracing::error!("{}", &err_msg);
-                self.block_tx
-                    .send(Err(tonic::Status::internal(err_msg)))
-                    .await
-                    .unwrap();
-                return;
-            }
-        };
+        let mut block_stream = provider.subscribe_blocks().await?;
 
         loop {
             // Select between block updates and commands
             tokio::select! {
                 Some(block) = block_stream.next() => {
-
-                    let network_str = self.network.clone().as_str_name();
-                    let block_number = block.number.unwrap().as_u64() as u64;
-                    let block_timestamp = block.timestamp.as_u64() as u64;
-                    // to hex string
-                    let block_hash = block.hash.unwrap().to_fixed_bytes();
-                    let block_hash = format!("0x{}", hex::encode(&block_hash));
-                    let gas_fee = block
-                    .base_fee_per_gas
-                    .map(|fee| fee.as_u64() as f64 / 1e9)
-                    .unwrap();
-
-                    tracing::info!(
-                        "received block {} for network {}",
-                        block_number,
-                        network_str
-                    );
-
-                        // Add the block to the database
-                        match self.storage.insert_block(
-                            network_str,
-                            block_number as i64,
-                            &block_hash,
-                            block_timestamp as i64,
-                            gas_fee,
-                        ).await {
-                            Ok(_) => {
-                                tracing::info!(
-                                    "inserted block {} for network {}",
-                                    block_number,
-                                    network_str
-                                );
-
-                                // Send the block update over the channel
-                                if let Err(e) = self.block_tx
-                                    .send(Ok(BlockUpdate {
-                                        network: self.network.into(),
-                                        block_number: block_number,
-                                        block_hash: block_hash,
-                                        timestamp: block_timestamp,
-                                        gas_fee: gas_fee,
-                                    }))
-                                    .await
-                                {
-                                    tracing::error!("failed to send block update: {}", e);
-                                    return;
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "failed to insert block {} for network {}: {}",
-                                    block_number,
-                                    network_str,
-                                    e
-                                );
-                            }
-                        }
+                    if let Err(e) = self.handle_block(block).await {
+                        tracing::error!("Failed to handle block: {}", e);
+                    }
                 },
                 Some(command) = self.command_rx.recv() => {
                     // Handle different commands, e.g., FetchBlocks
@@ -206,54 +187,8 @@ impl ProviderService {
                                 // Fetch the block from the provider
                                 match provider.get_block(block_number).await {
                                     Ok(Some(block)) => {
-                                        tracing::info!(
-                                            "fetched block {} for network {}",
-                                            block_number,
-                                            self.network.as_str_name()
-                                        );
-
-                                        let network_str = self.network.clone().as_str_name();
-                                        let block_number = block.number.unwrap().as_u64() as u64;
-                                        let block_timestamp = block.timestamp.as_u64() as u64;
-                                        // to hex string
-                                        let block_hash = block.hash.unwrap().to_fixed_bytes();
-                                        let block_hash = format!("0x{}", hex::encode(&block_hash));
-                                        let gas_fee = block
-                                            .base_fee_per_gas
-                                            .map(|fee| fee.as_u64() as f64 / 1e9)
-                                            .unwrap_or_else(|| 0.0);
-
-                                        // Add the block to the database
-                                        match self.storage.insert_block(
-                                            network_str,
-                                            block_number as i64,
-                                            &block_hash,
-                                            block_timestamp as i64,
-                                            gas_fee,
-                                        ).await {
-                                            Ok(_) => {
-                                                tracing::info!(
-                                                    "inserted block {} for network {}",
-                                                    block_number,
-                                                    network_str
-                                                );
-
-                                                blocks.push(BlockUpdate {
-                                                    network: self.network.into(),
-                                                    block_number: block_number,
-                                                    block_hash: block_hash,
-                                                    timestamp: block_timestamp,
-                                                    gas_fee: gas_fee,
-                                                });
-                                            }
-                                            Err(e) => {
-                                                tracing::error!(
-                                                    "failed to insert block {} for network {}: {}",
-                                                    block_number,
-                                                    network_str,
-                                                    e
-                                                );
-                                            }
+                                        if let Err(e) = self.handle_block(block).await {
+                                            tracing::error!("Failed to handle block: {}", e);
                                         }
                                     }
                                     Ok(None) => {

@@ -43,7 +43,7 @@ impl Gas for GasService {
         // Spawn a task to forward the block updates to the client
         tokio::spawn(async move {
             while let Some(block) = provider.2.lock().await.recv().await {
-                if let Err(e) = tx.send(block).await {
+                if let Err(e) = tx.send(Ok(block)).await {
                     tracing::error!("Failed to send block update: {}", e);
                     break;
                 }
@@ -62,20 +62,11 @@ impl Gas for GasService {
         let start_block = req.start_block;
         let end_block = req.end_block;
 
-        // start_block and end_block have to be multiples of 100
-        // if start_block % 100 != 0 || end_block % 100 != 0 {
-        //     return Err(Status::invalid_argument(
-        //         "start_block and end_block have to be multiples of 100",
-        //     ));
-        // }
-
         let (res_tx, res_rx) = oneshot::channel();
         let providers = self.providers.lock().await;
         let provider = providers
             .get(&network)
             .ok_or_else(|| Status::invalid_argument("Unsupported network"))?;
-
-        tracing::debug!("Sending command to fetch blocks");
 
         provider
             .1

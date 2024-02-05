@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use sqlx::{sqlite::SqliteRow, SqlitePool};
 
-use crate::pb::{BlockUpdate, Network};
+use crate::{error::Error, pb::{BlockUpdate, Network}};
 
 pub struct ProviderStorage {
     database: Arc<SqlitePool>,
@@ -27,7 +27,7 @@ impl ProviderStorage {
         block_hash: &str,
         block_timestamp: i64,
         gas_fee: f64,
-    ) -> Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error> {
+    ) -> Result<sqlx::sqlite::SqliteQueryResult, Error> {
         let mut conn = self.database.acquire().await.unwrap();
 
         sqlx::query!(
@@ -42,7 +42,7 @@ impl ProviderStorage {
             gas_fee
         )
         .execute(conn.as_mut())
-        .await
+        .await.map_err(Error::Database)
     }
 
     /// Reads blocks from the database.
@@ -57,7 +57,7 @@ impl ProviderStorage {
         start: i64,
         end: i64,
         by_timestamp: bool,
-    ) -> Result<Vec<BlockUpdate>, sqlx::Error> {
+    ) -> Result<Vec<BlockUpdate>, Error> {
         let mut conn = self.database.acquire().await?;
 
         if by_timestamp {
@@ -123,7 +123,7 @@ impl ProviderStorage {
     pub async fn read_latest_block(
         &self,
         network: &str,
-    ) -> Result<Option<BlockUpdate>, sqlx::Error> {
+    ) -> Result<Option<BlockUpdate>, Error> {
         let mut conn = self.database.acquire().await?;
 
         let row = sqlx::query!(
@@ -139,18 +139,16 @@ impl ProviderStorage {
         .fetch_optional(conn.as_mut())
         .await?;
 
-        let block = match row {
-            Some(row) => Some(BlockUpdate {
+        match row {
+            Some(row) => Ok(Some(BlockUpdate {
                 network: Network::from_str_name(&row.network).unwrap().into(),
                 block_number: row.block_number as u64,
                 block_hash: row.block_hash,
                 timestamp: row.block_timestamp as u64,
                 gas_fee: row.gas_fee,
-            }),
-            None => None,
-        };
-
-        Ok(block)
+            })),
+            None => Ok(None),
+        }
     }
 
     /// Read a block from the database.
@@ -161,7 +159,7 @@ impl ProviderStorage {
         &self,
         network: &str,
         block_number: i64,
-    ) -> Result<Option<BlockUpdate>, sqlx::Error> {
+    ) -> Result<Option<BlockUpdate>, Error> {
         let mut conn = self.database.acquire().await?;
 
         let row = sqlx::query!(
@@ -176,17 +174,15 @@ impl ProviderStorage {
         .fetch_optional(conn.as_mut())
         .await?;
 
-        let block = match row {
-            Some(row) => Some(BlockUpdate {
+        match row {
+            Some(row) => Ok(Some(BlockUpdate {
                 network: Network::from_str_name(&row.network).unwrap().into(),
                 block_number: row.block_number as u64,
                 block_hash: row.block_hash,
                 timestamp: row.block_timestamp as u64,
                 gas_fee: row.gas_fee,
-            }),
-            None => None,
-        };
-
-        Ok(block)
+            })),
+            None => Ok(None),
+        }
     }
 }
