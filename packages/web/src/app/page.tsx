@@ -12,6 +12,7 @@ import { AreaChart, Badge, BadgeDelta, Card, Title } from "@tremor/react";
 import Tooltip from "@/components/tooltip";
 import Pill from "@/components/pill";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Subscription } from "rxjs";
 
 export default function Home() {
   const gas = useMemo(
@@ -22,7 +23,7 @@ export default function Home() {
     []
   );
 
-  const [subscribed, setSubscribed] = useState(false);
+  const [subscription, setSubscription] = useState<Subscription>();
   const [blocks, setBlocks] = useState<BlockUpdate[]>([]);
   const [maxBlocks, setMaxBlocks] = useState(25);
 
@@ -34,7 +35,7 @@ export default function Home() {
         network: Network.ETH_MAINNET,
       });
 
-      sub.subscribe({
+      let subscription = sub.subscribe({
         next: (res) => {
           // add new block to our list
           setBlocks((prev) => [...prev, res]);
@@ -46,6 +47,8 @@ export default function Home() {
           console.log("complete");
         },
       });
+
+      setSubscription(subscription);
     };
 
     gas
@@ -58,12 +61,16 @@ export default function Home() {
         // we set our fetched blocks
         setBlocks(res.blockUpdates);
         // start subscription if not already started
-        if (!subscribed) {
-          setSubscribed(true);
+        if (!subscription) {
           startSubscription();
         }
       });
-  }, [gas, maxBlocks, subscribed]);
+
+    // cleanup
+    return () => {
+      subscription?.unsubscribe();
+    }
+  }, [gas, maxBlocks, subscription]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24">
