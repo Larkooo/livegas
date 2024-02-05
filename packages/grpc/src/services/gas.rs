@@ -10,11 +10,12 @@ use crate::{
         self, gas_server::Gas, BlockRangeReply, BlockRangeRequest, BlockUpdate, Network,
         SubscriptionRequest,
     },
-    provider::service::{Command, ProviderService},
+    provider::service::{BlockReceiver, Command, CommandSender, ProviderService},
 };
 
 pub struct GasService {
-    pub providers: Arc<Mutex<HashMap<Network, Arc<Mutex<ProviderService>>>>>,
+    pub providers:
+        Arc<Mutex<HashMap<Network, (Arc<Mutex<ProviderService>>, CommandSender, BlockReceiver)>>>,
 }
 
 type GasResult<T> = Result<Response<T>, Status>;
@@ -41,7 +42,7 @@ impl Gas for GasService {
 
         // Spawn a task to forward the block updates to the client
         tokio::spawn(async move {
-            while let Some(block) = provider.lock().await.block_rx.lock().await.recv().await {
+            while let Some(block) = provider.2.lock().await.recv().await {
                 if let Err(e) = tx.send(block).await {
                     tracing::error!("Failed to send block update: {}", e);
                     break;
@@ -70,19 +71,26 @@ impl Gas for GasService {
 
         let (res_tx, res_rx) = oneshot::channel();
         let providers = self.providers.lock().await;
-        let provider = providers.get(&network).ok_or_else(|| Status::invalid_argument("Unsupported network"))?;
-        let provider = provider.lock().await;
+        let provider = providers
+            .get(&network)
+            .ok_or_else(|| Status::invalid_argument("Unsupported network"))?;
 
         tracing::debug!("Sending command to fetch blocks");
 
-        provider.command_tx.lock().await.send(Command::FetchBlocks {
-            start_block,
-            end_block,
-            res: res_tx,
-        }).await.map_err(|e| {
-            tracing::error!("Failed to send command: {}", e);
-            Status::internal("Failed to send command")
-        })?;
+        provider
+            .1
+            .lock()
+            .await
+            .send(Command::FetchBlocks {
+                start_block,
+                end_block,
+                res: res_tx,
+            })
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to send command: {}", e);
+                Status::internal("Failed to send command")
+            })?;
 
         let blocks = res_rx.await.map_err(|e| {
             tracing::error!("Failed to receive command response: {}", e);

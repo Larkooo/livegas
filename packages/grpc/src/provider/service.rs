@@ -5,7 +5,10 @@ use ethers::{
     utils::hex,
 };
 use sqlx::{Sqlite, SqlitePool};
-use tokio::sync::Mutex;
+use tokio::sync::{
+    mpsc::{Receiver, Sender},
+    Mutex,
+};
 use tokio_stream::StreamExt;
 
 use crate::{
@@ -24,17 +27,17 @@ pub enum Command {
     },
 }
 
-pub struct ProviderService {
-    pub event_loop: Arc<Mutex<EventLoop>>,
-    pub block_rx: Arc<Mutex<tokio::sync::mpsc::Receiver<Result<BlockUpdate, tonic::Status>>>>,
-    pub command_tx: Arc<Mutex<tokio::sync::mpsc::Sender<Command>>>,
-}
+pub type BlockReceiver = Arc<Mutex<Receiver<Result<BlockUpdate, tonic::Status>>>>;
+pub type CommandSender = Arc<Mutex<Sender<Command>>>;
 
-pub struct EventLoop {
+/// The provider service.
+/// This service is responsible for subscribing to block updates and fetching blocks.
+/// It also handles the storage of blocks in the database.
+pub struct ProviderService {
     network: Network,
     provider: Arc<Mutex<Provider<Ws>>>,
-    block_tx: tokio::sync::mpsc::Sender<Result<BlockUpdate, tonic::Status>>,
-    command_rx: tokio::sync::mpsc::Receiver<Command>,
+    block_tx: Sender<Result<BlockUpdate, tonic::Status>>,
+    command_rx: Receiver<Command>,
     storage: ProviderStorage,
 }
 
@@ -43,35 +46,21 @@ impl ProviderService {
         network: Network,
         provider: Arc<Mutex<Provider<Ws>>>,
         database: Arc<SqlitePool>,
-    ) -> Self {
-        let (block_tx, block_rx) = tokio::sync::mpsc::channel(128);
+    ) -> (Arc<Mutex<Self>>, CommandSender, BlockReceiver) {
         let (command_tx, command_rx) = tokio::sync::mpsc::channel(128);
+        let (block_tx, block_rx) = tokio::sync::mpsc::channel(128);
 
-        Self {
-            event_loop: Arc::new(Mutex::new(EventLoop::new(
-                network, provider, database, block_tx, command_rx,
-            ))),
-            block_rx: Arc::new(Mutex::new(block_rx)),
-            command_tx: Arc::new(Mutex::new(command_tx)),
-        }
-    }
-}
-
-impl EventLoop {
-    pub fn new(
-        network: Network,
-        provider: Arc<Mutex<Provider<Ws>>>,
-        database: Arc<SqlitePool>,
-        block_tx: tokio::sync::mpsc::Sender<Result<BlockUpdate, tonic::Status>>,
-        command_rx: tokio::sync::mpsc::Receiver<Command>,
-    ) -> Self {
-        Self {
-            network,
-            provider,
-            block_tx,
-            command_rx,
-            storage: ProviderStorage::new(database),
-        }
+        (
+            Arc::new(Mutex::new(Self {
+                network,
+                provider,
+                block_tx,
+                command_rx,
+                storage: ProviderStorage::new(database),
+            })),
+            Arc::new(Mutex::new(command_tx)),
+            Arc::new(Mutex::new(block_rx)),
+        )
     }
 
     pub async fn run(&mut self) {
@@ -91,26 +80,28 @@ impl EventLoop {
         };
 
         loop {
+            // Select between block updates and commands
             tokio::select! {
                 Some(block) = block_stream.next() => {
+
+                    let network_str = self.network.clone().as_str_name();
+                    let block_number = block.number.unwrap().as_u64() as u64;
+                    let block_timestamp = block.timestamp.as_u64() as u64;
+                    // to hex string
+                    let block_hash = block.hash.unwrap().to_fixed_bytes();
+                    let block_hash = format!("0x{}", hex::encode(&block_hash));
+                    let gas_fee = block
+                    .base_fee_per_gas
+                    .map(|fee| fee.as_u64() as f64 / 1e9)
+                    .unwrap();
+
+                    tracing::info!(
+                        "received block {} for network {}",
+                        block_number,
+                        network_str
+                    );
+
                         // Add the block to the database
-                        let network_str = self.network.clone().as_str_name();
-                        let block_number = block.number.unwrap().as_u64() as u64;
-                        let block_timestamp = block.timestamp.as_u64() as u64;
-                        // to hex string
-                        let block_hash = block.hash.unwrap().to_fixed_bytes();
-                        let block_hash = format!("0x{}", hex::encode(&block_hash));
-                        let gas_fee = block
-                            .base_fee_per_gas
-                            .map(|fee| fee.as_u64() as f64 / 1e9)
-                            .unwrap();
-
-                        tracing::info!(
-                            "received block {} for network {}",
-                            block_number,
-                            network_str
-                        );
-
                         match self.storage.insert_block(
                             network_str,
                             block_number as i64,
@@ -153,11 +144,26 @@ impl EventLoop {
                 Some(command) = self.command_rx.recv() => {
                     // Handle different commands, e.g., FetchBlocks
                     match command {
-                        Command::FetchBlocks { start_block, end_block, res } => {
+                        Command::FetchBlocks { mut start_block, mut end_block, res } => {
                             let mut blocks = vec![];
+
+                            // If end_block is 0, fetch the latest block number
+                            // and use the start_block as negative offset
+                            if end_block == 0 {
+                                if let Ok(latest_block_number) = provider.get_block_number().await {
+                                    end_block = latest_block_number.as_u64();
+                                    start_block = end_block - start_block;
+                                    tracing::info!("Latest block number fetched: {}", end_block);
+                                } else {
+                                    tracing::error!("Failed to fetch the latest block number");
+                                    let _ = res.send(Err(tonic::Status::internal("Failed to fetch the latest block number")));
+                                    continue;
+                                }
+                            }
 
                             // Fetch and process blocks in the given range
                             for block_number in start_block..=end_block {
+                                // Check if the block is already in the database
                                 match self.storage.read_block(
                                     self.network.clone().as_str_name(),
                                     block_number as i64,
@@ -169,6 +175,7 @@ impl EventLoop {
                                             self.network.as_str_name()
                                         );
 
+                                        // Send the block update over the channel
                                         blocks.push(BlockUpdate {
                                             network: self.network.into(),
                                             block_number: block.block_number,
@@ -196,6 +203,7 @@ impl EventLoop {
                                     }
                                 }
 
+                                // Fetch the block from the provider
                                 match provider.get_block(block_number).await {
                                     Ok(Some(block)) => {
                                         tracing::info!(
@@ -215,6 +223,7 @@ impl EventLoop {
                                             .map(|fee| fee.as_u64() as f64 / 1e9)
                                             .unwrap_or_else(|| 0.0);
 
+                                        // Add the block to the database
                                         match self.storage.insert_block(
                                             network_str,
                                             block_number as i64,
