@@ -8,8 +8,9 @@ import {
   Network,
   BlockUpdate,
 } from "../../packages/proto/gas";
-import { AreaChart, Card, Title } from "@tremor/react";
+import { AreaChart, Badge, BadgeDelta, Card, Title } from "@tremor/react";
 import Tooltip from "@/components/tooltip";
+import Pill from "@/components/pill";
 
 export default function Home() {
   const client = useMemo(
@@ -63,9 +64,11 @@ export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24">
       <Card>
-        <Title>Newsletter revenue over time (USD)</Title>
+        <Pill className="absolute top-[10%] right-[10%] w-20 text-sm font-bold">
+          LIVE <div className="flex place-self-center rounded-full w-2 h-2 bg-red-500 animate-pulse"></div>
+        </Pill>
         <AreaChart
-          className="h-[70vh] w-full mt-4"
+          className="h-[80vh] w-full mt-4"
           data={blocks}
           index="blockNumber"
           yAxisWidth={50}
@@ -73,7 +76,9 @@ export default function Home() {
           colors={["indigo"]}
           valueFormatter={(v) => v.toFixed(2) + " wei"}
           customTooltip={Tooltip}
-        />
+        >
+          
+        </AreaChart>
       </Card>
     </main>
   );
