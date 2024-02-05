@@ -34,55 +34,18 @@ const DEFAULT_EXPOSED_HEADERS: [&str; 3] =
 const DEFAULT_ALLOW_HEADERS: [&str; 4] =
     ["x-grpc-web", "content-type", "x-user-agent", "grpc-timeout"];
 
-async fn insert_block(
-    network: Network,
-    block_number: u64,
-    block_hash: String,
-    block_timestamp: u64,
-    gas_fee: f64,
-    database: Arc<sqlx::sqlite::SqlitePool>,
-) -> Result<SqliteQueryResult, sqlx::Error> {
-    let network_str = network.as_str_name();
-    let mut conn = database.acquire().await.unwrap();
-    let mapped_block_number = block_number as i64;
-    let mapped_block_timestamp = block_timestamp as i64;
-
-    sqlx::query!(
-        r#"
-        INSERT INTO blocks (network, block_number, block_hash, block_timestamp, gas_fee)
-        VALUES (?, ?, ?, ?, ?)
-        "#,
-        network_str,
-        mapped_block_number,
-        block_hash,
-        mapped_block_timestamp,
-        gas_fee
-    )
-    .execute(conn.as_mut())
-    .await
-}
-
 async fn setup_ethereum_provider(
     database: Arc<sqlx::sqlite::SqlitePool>,
-    providers: Arc<Mutex<HashMap<Network, (
-        Arc<Mutex<ProviderService>>, 
-        CommandSender,
-        BlockReceiver 
-    )>>>,
+    providers: Arc<
+        Mutex<HashMap<Network, (Arc<Mutex<ProviderService>>, CommandSender, BlockReceiver)>>,
+    >,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let provider_url = std::env::var("PROVIDER_ETH_WSS_URL").unwrap();
     let provider = Arc::new(Mutex::new(Provider::connect(provider_url).await?));
     let network = Network::EthMainnet;
 
-    let provider_service = ProviderService::new(
-        network,
-        provider,
-        database.clone(),
-    );
-    providers.lock().await.insert(
-        network,
-        provider_service
-    );
+    let provider_service = ProviderService::new(network, provider, database.clone());
+    providers.lock().await.insert(network, provider_service);
 
     Ok(())
 }

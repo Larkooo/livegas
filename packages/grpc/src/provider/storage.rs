@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use sqlx::{sqlite::SqliteRow, SqlitePool};
 
-use crate::{error::Error, pb::{BlockUpdate, Network}};
+use crate::{
+    error::Error,
+    pb::{BlockUpdate, Network},
+};
 
 pub struct ProviderStorage {
     database: Arc<SqlitePool>,
@@ -42,7 +45,8 @@ impl ProviderStorage {
             gas_fee
         )
         .execute(conn.as_mut())
-        .await.map_err(Error::Database)
+        .await
+        .map_err(Error::Database)
     }
 
     /// Reads blocks from the database.
@@ -120,10 +124,7 @@ impl ProviderStorage {
     /// Reads the latest block from the database.
     /// - `network`: The network identifier (e.g., "ETH_MAINNET").
     /// Returns the row.
-    pub async fn read_latest_block(
-        &self,
-        network: &str,
-    ) -> Result<Option<BlockUpdate>, Error> {
+    pub async fn read_latest_block(&self, network: &str) -> Result<Option<BlockUpdate>, Error> {
         let mut conn = self.database.acquire().await?;
 
         let row = sqlx::query!(

@@ -10,10 +10,9 @@ pub enum Error {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
-   #[error("Channel send error: {0}")]
-   SendError(#[from] tokio::sync::mpsc::error::SendError<BlockUpdate>),
+    #[error("Channel send error: {0}")]
+    SendError(#[from] tokio::sync::mpsc::error::SendError<BlockUpdate>),
 
-   #[error("Provider error: {0}")]
-   ProviderError(#[from] ProviderError),
-
+    #[error("Provider error: {0}")]
+    ProviderError(#[from] ProviderError),
 }

@@ -14,7 +14,6 @@ use tokio_stream::StreamExt;
 
 use crate::{
     error::Error,
-    insert_block,
     pb::{BlockUpdate, Network},
 };
 
