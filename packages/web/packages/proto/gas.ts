@@ -1,8 +1,10 @@
 /* eslint-disable */
+import { grpc } from "@improbable-eng/grpc-web";
+import { BrowserHeaders } from "browser-headers";
 import Long from "long";
 import _m0 from "protobufjs/minimal";
 import { Observable } from "rxjs";
-import { map } from "rxjs/operators";
+import { share } from "rxjs/operators";
 
 export const protobufPackage = "gas";
 
@@ -47,6 +49,8 @@ export interface BlockUpdate {
   blockNumber: number;
   /** Hash of the new block. */
   blockHash: string;
+  /** The timestamp of the new block. */
+  timestamp: number;
   /** Gas fee for transactions in the new block. */
   gasFee: number;
 }
@@ -125,7 +129,7 @@ export const SubscriptionRequest = {
 };
 
 function createBaseBlockUpdate(): BlockUpdate {
-  return { network: 0, blockNumber: 0, blockHash: "", gasFee: 0 };
+  return { network: 0, blockNumber: 0, blockHash: "", timestamp: 0, gasFee: 0 };
 }
 
 export const BlockUpdate = {
@@ -134,13 +138,16 @@ export const BlockUpdate = {
       writer.uint32(8).int32(message.network);
     }
     if (message.blockNumber !== 0) {
-      writer.uint32(16).int64(message.blockNumber);
+      writer.uint32(16).uint64(message.blockNumber);
     }
     if (message.blockHash !== "") {
       writer.uint32(26).string(message.blockHash);
     }
+    if (message.timestamp !== 0) {
+      writer.uint32(32).uint64(message.timestamp);
+    }
     if (message.gasFee !== 0) {
-      writer.uint32(33).double(message.gasFee);
+      writer.uint32(41).double(message.gasFee);
     }
     return writer;
   },
@@ -164,7 +171,7 @@ export const BlockUpdate = {
             break;
           }
 
-          message.blockNumber = longToNumber(reader.int64() as Long);
+          message.blockNumber = longToNumber(reader.uint64() as Long);
           continue;
         case 3:
           if (tag !== 26) {
@@ -174,7 +181,14 @@ export const BlockUpdate = {
           message.blockHash = reader.string();
           continue;
         case 4:
-          if (tag !== 33) {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.timestamp = longToNumber(reader.uint64() as Long);
+          continue;
+        case 5:
+          if (tag !== 41) {
             break;
           }
 
@@ -194,6 +208,7 @@ export const BlockUpdate = {
       network: isSet(object.network) ? networkFromJSON(object.network) : 0,
       blockNumber: isSet(object.blockNumber) ? globalThis.Number(object.blockNumber) : 0,
       blockHash: isSet(object.blockHash) ? globalThis.String(object.blockHash) : "",
+      timestamp: isSet(object.timestamp) ? globalThis.Number(object.timestamp) : 0,
       gasFee: isSet(object.gasFee) ? globalThis.Number(object.gasFee) : 0,
     };
   },
@@ -209,6 +224,9 @@ export const BlockUpdate = {
     if (message.blockHash !== "") {
       obj.blockHash = message.blockHash;
     }
+    if (message.timestamp !== 0) {
+      obj.timestamp = Math.round(message.timestamp);
+    }
     if (message.gasFee !== 0) {
       obj.gasFee = message.gasFee;
     }
@@ -223,6 +241,7 @@ export const BlockUpdate = {
     message.network = object.network ?? 0;
     message.blockNumber = object.blockNumber ?? 0;
     message.blockHash = object.blockHash ?? "";
+    message.timestamp = object.timestamp ?? 0;
     message.gasFee = object.gasFee ?? 0;
     return message;
   },
@@ -238,10 +257,10 @@ export const BlockRangeRequest = {
       writer.uint32(8).int32(message.network);
     }
     if (message.startBlock !== 0) {
-      writer.uint32(16).int64(message.startBlock);
+      writer.uint32(16).uint64(message.startBlock);
     }
     if (message.endBlock !== 0) {
-      writer.uint32(24).int64(message.endBlock);
+      writer.uint32(24).uint64(message.endBlock);
     }
     return writer;
   },
@@ -265,14 +284,14 @@ export const BlockRangeRequest = {
             break;
           }
 
-          message.startBlock = longToNumber(reader.int64() as Long);
+          message.startBlock = longToNumber(reader.uint64() as Long);
           continue;
         case 3:
           if (tag !== 24) {
             break;
           }
 
-          message.endBlock = longToNumber(reader.int64() as Long);
+          message.endBlock = longToNumber(reader.uint64() as Long);
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -380,39 +399,188 @@ export const BlockRangeReply = {
 
 export interface Gas {
   /** Subscribes to receive updates for upcoming blocks of a specified blockchain. */
-  Subscribe(request: SubscriptionRequest): Observable<BlockUpdate>;
+  Subscribe(request: DeepPartial<SubscriptionRequest>, metadata?: grpc.Metadata): Observable<BlockUpdate>;
   /** Retrieves gas fee information for a specified span of past blocks. */
-  Blocks(request: BlockRangeRequest): Promise<BlockRangeReply>;
+  Blocks(request: DeepPartial<BlockRangeRequest>, metadata?: grpc.Metadata): Promise<BlockRangeReply>;
 }
 
-export const GasServiceName = "gas.Gas";
 export class GasClientImpl implements Gas {
   private readonly rpc: Rpc;
-  private readonly service: string;
-  constructor(rpc: Rpc, opts?: { service?: string }) {
-    this.service = opts?.service || GasServiceName;
+
+  constructor(rpc: Rpc) {
     this.rpc = rpc;
     this.Subscribe = this.Subscribe.bind(this);
     this.Blocks = this.Blocks.bind(this);
   }
-  Subscribe(request: SubscriptionRequest): Observable<BlockUpdate> {
-    const data = SubscriptionRequest.encode(request).finish();
-    const result = this.rpc.serverStreamingRequest(this.service, "Subscribe", data);
-    return result.pipe(map((data) => BlockUpdate.decode(_m0.Reader.create(data))));
+
+  Subscribe(request: DeepPartial<SubscriptionRequest>, metadata?: grpc.Metadata): Observable<BlockUpdate> {
+    return this.rpc.invoke(GasSubscribeDesc, SubscriptionRequest.fromPartial(request), metadata);
   }
 
-  Blocks(request: BlockRangeRequest): Promise<BlockRangeReply> {
-    const data = BlockRangeRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "Blocks", data);
-    return promise.then((data) => BlockRangeReply.decode(_m0.Reader.create(data)));
+  Blocks(request: DeepPartial<BlockRangeRequest>, metadata?: grpc.Metadata): Promise<BlockRangeReply> {
+    return this.rpc.unary(GasBlocksDesc, BlockRangeRequest.fromPartial(request), metadata);
   }
 }
 
+export const GasDesc = { serviceName: "gas.Gas" };
+
+export const GasSubscribeDesc: UnaryMethodDefinitionish = {
+  methodName: "Subscribe",
+  service: GasDesc,
+  requestStream: false,
+  responseStream: true,
+  requestType: {
+    serializeBinary() {
+      return SubscriptionRequest.encode(this).finish();
+    },
+  } as any,
+  responseType: {
+    deserializeBinary(data: Uint8Array) {
+      const value = BlockUpdate.decode(data);
+      return {
+        ...value,
+        toObject() {
+          return value;
+        },
+      };
+    },
+  } as any,
+};
+
+export const GasBlocksDesc: UnaryMethodDefinitionish = {
+  methodName: "Blocks",
+  service: GasDesc,
+  requestStream: false,
+  responseStream: false,
+  requestType: {
+    serializeBinary() {
+      return BlockRangeRequest.encode(this).finish();
+    },
+  } as any,
+  responseType: {
+    deserializeBinary(data: Uint8Array) {
+      const value = BlockRangeReply.decode(data);
+      return {
+        ...value,
+        toObject() {
+          return value;
+        },
+      };
+    },
+  } as any,
+};
+
+interface UnaryMethodDefinitionishR extends grpc.UnaryMethodDefinition<any, any> {
+  requestStream: any;
+  responseStream: any;
+}
+
+type UnaryMethodDefinitionish = UnaryMethodDefinitionishR;
+
 interface Rpc {
-  request(service: string, method: string, data: Uint8Array): Promise<Uint8Array>;
-  clientStreamingRequest(service: string, method: string, data: Observable<Uint8Array>): Promise<Uint8Array>;
-  serverStreamingRequest(service: string, method: string, data: Uint8Array): Observable<Uint8Array>;
-  bidirectionalStreamingRequest(service: string, method: string, data: Observable<Uint8Array>): Observable<Uint8Array>;
+  unary<T extends UnaryMethodDefinitionish>(
+    methodDesc: T,
+    request: any,
+    metadata: grpc.Metadata | undefined,
+  ): Promise<any>;
+  invoke<T extends UnaryMethodDefinitionish>(
+    methodDesc: T,
+    request: any,
+    metadata: grpc.Metadata | undefined,
+  ): Observable<any>;
+}
+
+export class GrpcWebImpl {
+  private host: string;
+  private options: {
+    transport?: grpc.TransportFactory;
+    streamingTransport?: grpc.TransportFactory;
+    debug?: boolean;
+    metadata?: grpc.Metadata;
+    upStreamRetryCodes?: number[];
+  };
+
+  constructor(
+    host: string,
+    options: {
+      transport?: grpc.TransportFactory;
+      streamingTransport?: grpc.TransportFactory;
+      debug?: boolean;
+      metadata?: grpc.Metadata;
+      upStreamRetryCodes?: number[];
+    },
+  ) {
+    this.host = host;
+    this.options = options;
+  }
+
+  unary<T extends UnaryMethodDefinitionish>(
+    methodDesc: T,
+    _request: any,
+    metadata: grpc.Metadata | undefined,
+  ): Promise<any> {
+    const request = { ..._request, ...methodDesc.requestType };
+    const maybeCombinedMetadata = metadata && this.options.metadata
+      ? new BrowserHeaders({ ...this.options?.metadata.headersMap, ...metadata?.headersMap })
+      : metadata ?? this.options.metadata;
+    return new Promise((resolve, reject) => {
+      grpc.unary(methodDesc, {
+        request,
+        host: this.host,
+        metadata: maybeCombinedMetadata ?? {},
+        ...(this.options.transport !== undefined ? { transport: this.options.transport } : {}),
+        debug: this.options.debug ?? false,
+        onEnd: function (response) {
+          if (response.status === grpc.Code.OK) {
+            resolve(response.message!.toObject());
+          } else {
+            const err = new GrpcWebError(response.statusMessage, response.status, response.trailers);
+            reject(err);
+          }
+        },
+      });
+    });
+  }
+
+  invoke<T extends UnaryMethodDefinitionish>(
+    methodDesc: T,
+    _request: any,
+    metadata: grpc.Metadata | undefined,
+  ): Observable<any> {
+    const upStreamCodes = this.options.upStreamRetryCodes ?? [];
+    const DEFAULT_TIMEOUT_TIME: number = 3_000;
+    const request = { ..._request, ...methodDesc.requestType };
+    const transport = this.options.streamingTransport ?? this.options.transport;
+    const maybeCombinedMetadata = metadata && this.options.metadata
+      ? new BrowserHeaders({ ...this.options?.metadata.headersMap, ...metadata?.headersMap })
+      : metadata ?? this.options.metadata;
+    return new Observable((observer) => {
+      const upStream = () => {
+        const client = grpc.invoke(methodDesc, {
+          host: this.host,
+          request,
+          ...(transport !== undefined ? { transport } : {}),
+          metadata: maybeCombinedMetadata ?? {},
+          debug: this.options.debug ?? false,
+          onMessage: (next) => observer.next(next),
+          onEnd: (code: grpc.Code, message: string, trailers: grpc.Metadata) => {
+            if (code === 0) {
+              observer.complete();
+            } else if (upStreamCodes.includes(code)) {
+              setTimeout(upStream, DEFAULT_TIMEOUT_TIME);
+            } else {
+              const err = new Error(message) as any;
+              err.code = code;
+              err.metadata = trailers;
+              observer.error(err);
+            }
+          },
+        });
+        observer.add(() => client.close());
+      };
+      upStream();
+    }).pipe(share());
+  }
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
@@ -441,4 +609,10 @@ if (_m0.util.Long !== Long) {
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;
+}
+
+export class GrpcWebError extends globalThis.Error {
+  constructor(message: string, public code: grpc.Code, public metadata: grpc.Metadata) {
+    super(message);
+  }
 }

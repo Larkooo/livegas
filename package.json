@@ -15,9 +15,11 @@
   "scripts": {
     "web": "bun run --cwd packages/web",
     "grpc": "cargo run grpc",
-    "proto": "protoc --plugin=node_modules/ts-proto/protoc-gen-ts_proto packages/proto/src/*.proto --ts_proto_out=packages/proto/bindings --ts_proto_opt=esModuleInterop=true"
+    "proto": "protoc --plugin=node_modules/ts-proto/protoc-gen-ts_proto packages/proto/*.proto --ts_proto_out=packages/web --ts_proto_opt=esModuleInterop=true --ts_proto_opt=outputClientImpl=grpc-web"
   },
   "dependencies": {
+    "@improbable-eng/grpc-web": "^0.15.0",
+    "browser-headers": "^0.4.1",
     "long": "^5.2.3",
     "rxjs": "^7.8.1"
   }
