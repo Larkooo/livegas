@@ -74,7 +74,7 @@ export default function Home() {
           yAxisWidth={50}
           categories={["gasFee"]}
           colors={["indigo"]}
-          valueFormatter={(v) => v.toFixed(2) + " wei"}
+          valueFormatter={(v) => v.toFixed(2) + " gwei"}
           customTooltip={Tooltip}
         >
           

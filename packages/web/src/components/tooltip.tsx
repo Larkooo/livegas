@@ -15,7 +15,7 @@ const Tooltip = (props: any) => {
           <div className="space-y-1">
             <p className="text-tremor-content">{category.dataKey}</p>
             <p className="font-medium text-tremor-content-emphasis">
-              {category.value} wei
+              {category.value} gwei
             </p>
           </div>
         </div>
