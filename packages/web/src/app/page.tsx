@@ -65,11 +65,6 @@ export default function Home() {
           startSubscription();
         }
       });
-
-    // cleanup
-    return () => {
-      subscription?.unsubscribe();
-    }
   }, [gas, maxBlocks, subscription]);
 
   return (
